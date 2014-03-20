@@ -163,19 +163,28 @@ if __name__ == "__main__" :
     #print "Factorization"
     #print np.dot(rec.w,rec.h)
 
-    # some performance calculations
-    #start_time = time.time()
-    #data = load_movielens_ratings100k()
-    #rec = SVDSGDRecommender(data, 10, 200, 0.001, 0.0, True, 0.0002, 0.02, False)
-    #data = generate()
-    #print "Data building took " + str(time.time() - start_time), "seconds"
-    #start_time = time.time()
-    #data, iterations=5000, factors=2, lr=0.001, reg= 0.02, with_preference=False
-    # for time testing :     rec = SVDSGDRecommender(data, 10, 200, 0.001, 0.02, False, 0.001, 0.02, False)
+    #some performance calculations
+    start_time = time.time()
+    data = load_movielens_ratings100k()
+    rec = SVDSGDRecommender(data,
+        iterations=1,
+        factors=200,
+        learning_rate=0.001,
+        regularization=0.0,
+        with_bias=False,
+        bias_learning_rate=0.0002,
+        bias_regularization=0.02,
+        with_feedback=True)
 
-    #print rec.data
-    #print "Factorization took " + str(time.time() - start_time), "seconds"
-    #print np.dot(rec.p,rec.q)
-    #start_time = time.time()
-    #eval_movielens_test100k(rec)
-    #print "Evaluation took " + str(time.time() - start_time), "seconds"
+    data = generate()
+    print "Data building took " + str(time.time() - start_time), "seconds"
+    start_time = time.time()
+    # data, iterations=5000, factors=2, lr=0.001, reg= 0.02, with_preference=False
+    #for time testing :     rec = SVDSGDRecommender(data, 10, 200, 0.001, 0.02, False, 0.001, 0.02, False)
+
+    # print rec.data
+    # print "Factorization took " + str(time.time() - start_time), "seconds"
+    # print np.dot(rec.p,rec.q)
+    # start_time = time.time()
+    # eval_movielens_test100k(rec)
+    # print "Evaluation took " + str(time.time() - start_time), "seconds"

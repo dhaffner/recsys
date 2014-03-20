@@ -45,16 +45,19 @@ class SVDSGDRecommender(BaseRecommender):
         if self.with_feedback:
             rowcol = np.array(self.data.nonzero(),dtype=long)
             values = np.array(self.data.data,dtype=np.float64)
-            item_indices = np.array(data.indices, dtype = long)     
+            item_indices = np.array(data.indices, dtype = long)
             user_pointers = np.array(data.indptr, dtype = long)
+
+            print('using svd++')
 
             self.p, self.q, self.y, self.user_bias, self.item_bias, self.rmse, self.global_average = svd_plus_plus(
                                                                self.no_users, self.no_items, self.no_ratings,
                                                                rowcol, values, item_indices, user_pointers,
-                                                               factors, iterations, 
+                                                               factors, iterations,
                                                                learning_rate, self.regularization,
                                                                bias_learning_rate, bias_regularization)
         elif self.with_bias:
+            print('using svd')
             self.p, self.q, self.user_bias, self.item_bias, self.rmse, self.global_average = svd(self.data,
                                                                factors, iterations, learning_rate, self.regularization,
                                                                bias_learning_rate, bias_regularization)
@@ -77,7 +80,7 @@ class SVDSGDRecommender(BaseRecommender):
                 1.0,5.0, \
                 self.global_average, self.user_bias[user_id-1], self.item_bias[item_id-1])
         else:
-            return clamped_predict(self.p[user_id-1,:],self.q[:,item_id-1],1.0,5.0) 
+            return clamped_predict(self.p[user_id-1,:],self.q[:,item_id-1],1.0,5.0)
         #return np.dot(self.p[user_id-1,:],self.q[:,item_id-1])
 
     def factorize_optimized(self,
