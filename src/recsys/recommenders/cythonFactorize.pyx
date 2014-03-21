@@ -1,3 +1,8 @@
+# cython: profile=True
+# cython: boundscheck=False
+# cython: infer_types=True
+#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
+
 import sys, os
 import scipy as sp
 import numpy as np
@@ -7,10 +12,6 @@ cimport numpy as np
 
 from cpython cimport bool
 import cython
-
-
-# cython: profile=True
-#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 
 DTYPE = np.float64
 
@@ -323,9 +324,14 @@ def svd_plus_plus(
     rated_items = []
 
     print 'users :: min {} , max {} , len {}'.format(min(users), max(users), len(users))
+    cdef unsigned int maxlength = 0
+
     for user in users:
         items = item_indices[user_pointers[user]:user_pointers[user+1]] if (user < user_pointers.size-1) else item_indices[user_pointers[user]:]
         rated_items.append(items)
+        if len(items) > maxlength:
+            maxlength = len(items)
+
 
     #compute mean
     for x in xrange(dim):
@@ -363,10 +369,13 @@ def svd_plus_plus(
     denominator = np.sqrt(temp_indices.size)
 
     for step in xrange(max_steps):
+
         print "Step:",step
         start_time = time.time()
 
         for x in xrange(dim):
+
+
             u = rowcol[0,x]
             i = rowcol[1,x]
             #add biases
@@ -375,6 +384,7 @@ def svd_plus_plus(
             # calculate y.SumOfRows(items_rated_by_user[u]);
             py_sum = np.zeros(K, dtype=DTYPE)
             #item_indices = np.array(data.getrow(u).indices, dtype = long)
+
             if u != last:
                 temp_indices = rated_items[u]#item_indices[user_pointers[u]:user_pointers[u+1]] if (u < user_pointers.size-1) else item_indices[user_pointers[u]:]
                 denominator = np.sqrt(temp_indices.size)
@@ -382,22 +392,8 @@ def svd_plus_plus(
             #print u, temp_indices
 
             for j in xrange(K):
-                for it in temp_indices:
-                    py_sum[j] += y[it,j]
-
-                #normalize
-                py_sum[j] /= denominator
-                #add p to it
-                py_sum[j] += p[u,j]
-
-                #calculate error for gradient
-                #e = (self.data[u,i]-np.dot(py_sum,self.q.T[:,i]))
-
-                estimated_rating += py_sum[j] * q[j,i]
-                if estimated_rating < 1.0 :
-                    estimated_rating = 1.0
-                elif estimated_rating > 5.0:
-                    estimated_rating = 5.0
+                etimated_rating = svdpp_inner_loop(temp_indices,
+                    py_sum, y, denominator, j, u, i, estimated_rating, p, q)
 
             e = values[x] - estimated_rating
 
@@ -409,16 +405,19 @@ def svd_plus_plus(
 
             #adjust y first
             for j in xrange(K):
-                for it in temp_indices:
-                    y[it,j] *= (1 - learning_rate * regularization)
-                    y[it,j] += learning_rate * e / denominator * q[j,i]
-
-            # then q and p
-
-                #p_temp = learning_rate * ( e * q[j,i] - regularization * p[u,j])
-                q[j,i] *= (1.0-learning_rate * regularization)
-                q[j,i] += e * learning_rate * py_sum[j]
-                p[u,j] += learning_rate * ( e * q[j,i] - regularization * p[u,j])
+                svdpp_inner_loop2(
+                    temp_indices,
+                    p,
+                    q,
+                    y,
+                    i,
+                    j,
+                    u,
+                    learning_rate,
+                    regularization,
+                    e,
+                    denominator,
+                    py_sum)
 
         average_time += time.time() - start_time
 
@@ -445,6 +444,65 @@ def svd_plus_plus(
 
 
 ####### Helper functions
+
+@cython.boundscheck(False)
+cdef np.float64_t svdpp_inner_loop(
+    np.ndarray[long, ndim=1] temp_indices,
+    np.ndarray[DTYPE_t,ndim=1] py_sum,
+    np.ndarray[DTYPE_t,ndim=2] y,
+    np.float64_t denominator,
+    long j,
+    long u,
+    long i,
+    np.float64_t estimated_rating,
+    np.ndarray[DTYPE_t,ndim=2] p,
+    np.ndarray[DTYPE_t,ndim=2] q):
+
+    cdef long it
+    for it in temp_indices:
+        py_sum[j] += y[it,j]
+
+    #normalize
+    py_sum[j] /= denominator
+    #add p to it
+    py_sum[j] += p[u,j]
+
+    #calculate error for gradient
+    #e = (self.data[u,i]-np.dot(py_sum,self.q.T[:,i]))
+
+    estimated_rating += py_sum[j] * q[j,i]
+    if estimated_rating < 1.0 :
+        estimated_rating = 1.0
+    elif estimated_rating > 5.0:
+        estimated_rating = 5.0
+
+    return estimated_rating
+
+cdef svdpp_inner_loop2(
+    np.ndarray[long, ndim = 1] temp_indices,
+    np.ndarray[DTYPE_t,ndim=2] p,
+    np.ndarray[DTYPE_t,ndim=2] q,
+    np.ndarray[DTYPE_t,ndim=2] y,
+    long i,
+    long j,
+    long u,
+    np.float64_t learning_rate,
+    np.float64_t regularization,
+    np.float64_t e,
+    np.float64_t denominator,
+    np.ndarray[DTYPE_t,ndim=1] py_sum):
+
+    for it in temp_indices:
+        y[it,j] *= (1 - learning_rate * regularization)
+        y[it,j] += learning_rate * e / denominator * q[j,i]
+
+# then q and p
+
+    #p_temp = learning_rate * ( e * q[j,i] - regularization * p[u,j])
+    q[j,i] *= (1.0-learning_rate * regularization)
+    q[j,i] += e * learning_rate * py_sum[j]
+    p[u,j] += learning_rate * ( e * q[j,i] - regularization * p[u,j])
+
 
 def clamped_predict(np.ndarray[DTYPE_t,ndim=1] p_row,np.ndarray[DTYPE_t,ndim=1] q_row,np.float64_t min_val,np.float64_t max_val):
     #as recommended by Funk
