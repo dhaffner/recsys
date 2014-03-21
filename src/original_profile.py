@@ -1,7 +1,7 @@
 # encoding: utf-8
 # filename: profile.py
 
-import cythonFactorize
+from recsys.recommenders import original_cythonFactorize
 import numpy as np
 from recsys.data.base import load_movielens_ratings100k, generate
 
@@ -19,9 +19,9 @@ values = np.array(data.data,dtype=np.float64)
 item_indices = np.array(data.indices, dtype = long)
 user_pointers = np.array(data.indptr, dtype = long)
 
-cProfile.runctx("cythonFactorize.svd_plus_plus(\
-	no_users, no_items, no_ratings,\
+cProfile.runctx("original_cythonFactorize.svd_plus_plus(\
+    no_users, no_items, no_ratings,\
     rowcol, values, item_indices, user_pointers,\
-	200, 1, 0.001, 0.0011, 0.001, 0.0011)", globals(), locals(), "Profile.prof")
+    2, 1, 0.002, 0.011, 0.001, 0.0011)", globals(), locals(), "Profile.prof")
 s = pstats.Stats("Profile.prof")
 s.strip_dirs().sort_stats("time").print_stats()
