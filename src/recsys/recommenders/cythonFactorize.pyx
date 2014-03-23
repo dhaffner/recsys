@@ -303,7 +303,8 @@ def svd_plus_plus(
 
     cdef np.ndarray[DTYPE_t,ndim=1] py_sum = np.empty(K, dtype=DTYPE)
 
-    cdef np.ndarray[long, ndim = 1] temp_indices = np.empty(M, dtype = long)
+    #cdef np.ndarray[long, ndim = 1] temp_indices = np.empty(M, dtype=long)
+
 
     cdef np.float64_t estimated_rating
     cdef np.float64_t global_average = 0.0
@@ -317,7 +318,7 @@ def svd_plus_plus(
 
     cdef long step, j, it, x #iterators
     cdef long i, u, last #indices
-    cdef rated_items = dict()
+    cdef long ti, idx
     #cdef unsigned int dim = data.size
 
     # cache a dictionary of user-rated_items mappings
@@ -325,15 +326,10 @@ def svd_plus_plus(
     users = set(rowcol[0,:])
     rated_items = []
 
-    print 'users :: min {} , max {} , len {}'.format(min(users), max(users), len(users))
-    cdef unsigned int maxlength = 0
-
+    cdef np.ndarray[long, ndim=1] items, temp_indices
     for user in users:
         items = item_indices[user_pointers[user]:user_pointers[user+1]] if (user < user_pointers.size-1) else item_indices[user_pointers[user]:]
         rated_items.append(items)
-        if len(items) > maxlength:
-            maxlength = len(items)
-
 
     #compute mean
     for x in xrange(dim):
@@ -376,10 +372,9 @@ def svd_plus_plus(
         start_time = time.time()
 
         for x in xrange(dim):
-
-
             u = rowcol[0,x]
             i = rowcol[1,x]
+
             #add biases
             estimated_rating = global_average + user_bias[u] + item_bias[i]
 
@@ -394,8 +389,22 @@ def svd_plus_plus(
             #print u, temp_indices
 
             for j in xrange(K):
-                estimated_rating = svdpp_inner_loop(temp_indices,
-                    py_sum, y, denominator, j, u, i, estimated_rating, p, q)
+                for ti in xrange(temp_indices.size):
+                    py_sum[j] += y[temp_indices[ti],j]
+
+                #normalize
+                py_sum[j] /= denominator
+                #add p to it
+                py_sum[j] += p[u,j]
+
+                #calculate error for gradient
+                #e = (self.data[u,i]-np.dot(py_sum,self.q.T[:,i]))
+
+                estimated_rating += py_sum[j] * q[j,i]
+                if estimated_rating < 1.0 :
+                    estimated_rating = 1.0
+                elif estimated_rating > 5.0:
+                    estimated_rating = 5.0
 
             e = values[x] - estimated_rating
 
@@ -407,19 +416,17 @@ def svd_plus_plus(
 
             #adjust y first
             for j in xrange(K):
-                svdpp_inner_loop2(
-                    temp_indices,
-                    p,
-                    q,
-                    y,
-                    i,
-                    j,
-                    u,
-                    learning_rate,
-                    regularization,
-                    e,
-                    denominator,
-                    py_sum)
+                for ti in xrange(temp_indices.size):
+                    idx = temp_indices[ti]
+                    y[idx,j] *= (1 - learning_rate * regularization)
+                    y[idx,j] += learning_rate * e / denominator * q[j,i]
+
+            # then q and p
+
+                #p_temp = learning_rate * ( e * q[j,i] - regularization * p[u,j])
+                q[j,i] *= (1.0-learning_rate * regularization)
+                q[j,i] += e * learning_rate * py_sum[j]
+                p[u,j] += learning_rate * ( e * q[j,i] - regularization * p[u,j])
 
         average_time += time.time() - start_time
 
@@ -608,19 +615,25 @@ cdef np.float64_t rmse_bias(np.ndarray[DTYPE_t,ndim=1] values, np.ndarray[long,n
     return np.sqrt(total/np.float64(dim))
 
 cdef np.float64_t rmse_feedback(
-    np.ndarray[DTYPE_t,ndim=1] values, np.ndarray[long,ndim=2] rowcol,
-    np.ndarray[long, ndim = 1] item_indices, np.ndarray[long, ndim = 1] user_pointers,
-    np.ndarray[DTYPE_t,ndim=2] p, np.ndarray[DTYPE_t,ndim=2] q, np.ndarray[DTYPE_t,ndim=2] y,
-    unsigned int dim, int K,
+    np.ndarray[DTYPE_t,ndim=1] values,
+    np.ndarray[long,ndim=2] rowcol,
+    np.ndarray[long, ndim = 1] item_indices,
+    np.ndarray[long, ndim = 1] user_pointers,
+    np.ndarray[DTYPE_t,ndim=2] p,
+    np.ndarray[DTYPE_t,ndim=2] q,
+    np.ndarray[DTYPE_t,ndim=2] y,
+    unsigned int dim,
+    int K,
     np.float64_t global_average,
-    np.ndarray[DTYPE_t,ndim=1] user_bias, np.ndarray[DTYPE_t,ndim=1] item_bias):
+    np.ndarray[DTYPE_t,ndim=1] user_bias,
+    np.ndarray[DTYPE_t,ndim=1] item_bias):
     # calculate RMSE for the recommender and return it
 
     cdef np.float64_t estimated_rating
     cdef np.ndarray[DTYPE_t,ndim=1] py_sum = np.empty(K)
     cdef np.float64_t total = 0.0
     cdef np.float64_t denominator = 0.0
-    cdef unsigned int x, u, i, j,it,w
+    cdef unsigned int x, u, i, j,it, idx, w
 
     for x in xrange(dim):
         u = rowcol[0,x]
@@ -631,12 +644,18 @@ cdef np.float64_t rmse_feedback(
         # calculate y.SumOfRows(items_rated_by_user[u]);
         py_sum = np.zeros(K)
 
-        temp_indices = item_indices[user_pointers[u]:user_pointers[u+1]] if (u < user_pointers.size-1) else item_indices[user_pointers[u]:]
-        denominator = np.sqrt(temp_indices.size)
+        if u < user_pointers.size - 1:
+            temp_indices = item_indices[user_pointers[u]:user_pointers[u+1]]
+        else:
+            temp_indices = item_indices[user_pointers[u]:]
 
-        for it in temp_indices:
+
+        denominator = np.sqrt(temp_indices.size)
+        for it in xrange(temp_indices.size):
+            idx = temp_indices[it]
             for w in xrange(K):
-                py_sum[w] += y[it,w]
+                py_sum[w] += y[idx,w]
+
         for j in xrange(K):
             #normalize
             py_sum[j] /= denominator
@@ -652,4 +671,5 @@ cdef np.float64_t rmse_feedback(
             elif estimated_rating > 5.0:
                 estimated_rating = 5.0
         total += (values[x]-estimated_rating)**2
-    return np.sqrt(total/np.float64(dim))
+
+    return np.sqrt(total / np.float64(dim))
